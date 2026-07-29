@@ -6,10 +6,15 @@ import (
 
 func main() {
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.Dir(".")))
+	mux.Handle("/app/", http.StripPrefix("/app/", http.FileServer(http.Dir("."))))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("OK"))
+		})
 	server := http.Server{
 		Addr: ":8080",
 		Handler: mux,
 	}
 	server.ListenAndServe()
 }
+
