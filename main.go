@@ -1,16 +1,22 @@
 package main
 
 import (
+	"os"
 	"log"
 	"fmt"
 	"strings"
 	"encoding/json"
 	"sync/atomic"
 	"net/http"
+	"database/sql"
+	"github.com/joho/godotenv"
+	"github.com/elysium-cmd/chirpy/internal/database"
 )
+import _ "github.com/lib/pq"
 
 type apiConfig struct {
 	fileServerHits atomic.Int32
+	dbQueries *database.Queries
 }
 
 type errors struct {
@@ -85,8 +91,17 @@ func health(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Printf("Error connecting to database %s", err)
+		return
+	}
 	mux := http.NewServeMux()
-	apiCfg := apiConfig{}
+	apiCfg := apiConfig {
+		dbQueries: database.New(db),
+	}
 	apiCfg.fileServerHits.Store(0)
 	mux.Handle("/app/", apiCfg.middlewareMetrics(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("/api/validate_chirp", validate)
