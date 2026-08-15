@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"fmt"
+	"strings"
 	"encoding/json"
 	"sync/atomic"
 	"net/http"
@@ -16,8 +17,8 @@ type errors struct {
 	Error string `json:"error"`
 }
 
-type valid struct {
-	Valid bool `json:"valid"`
+type response struct {
+	CleanedBody string `json:"cleaned_body"`
 }
 
 func (cfg *apiConfig) middlewareMetrics(next http.Handler) http.Handler {
@@ -54,8 +55,17 @@ func validate(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		w.Write(data)
 	} else {
-		respBody := valid{
-			Valid: true,
+		cleanedBody := ""
+		splitBody := strings.Split(params.Body, " ")
+		for index := range splitBody {
+			lowerCaseWord := strings.ToLower(splitBody[index])
+			if lowerCaseWord == "kerfuffle" || lowerCaseWord == "sharbert" || lowerCaseWord == "fornax"{
+				splitBody[index] = "****"
+			}
+		}
+		cleanedBody = strings.Join(splitBody, " ")
+		respBody := response{
+			CleanedBody: cleanedBody,
 		}
 		data, err := json.Marshal(respBody)
 		if err != nil {
@@ -74,17 +84,6 @@ func health(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func metrics(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(200)
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", apiCfg.fileServerHits.Load())))
-}
-
-func reset(w http.ResponseWriter, r *http.Request) {
-	apiCfg.fileServerHits.Store(0)
-	w.WriteHeader(200)
-}
-
 func main() {
 	mux := http.NewServeMux()
 	apiCfg := apiConfig{}
@@ -92,8 +91,15 @@ func main() {
 	mux.Handle("/app/", apiCfg.middlewareMetrics(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("/api/validate_chirp", validate)
 	mux.HandleFunc("GET /api/healthz", health)
-	mux.HandleFunc("GET /admin/metrics", metrics)
-	mux.HandleFunc("POST /admin/reset", reset)
+	mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, r *http.Request){
+		w.WriteHeader(200)
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", apiCfg.fileServerHits.Load())))
+	})
+	mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, r *http.Request){
+		apiCfg.fileServerHits.Store(0)
+		w.WriteHeader(200)
+	})
 	server := http.Server{
 		Addr: ":8080",
 		Handler: mux,
