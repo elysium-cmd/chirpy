@@ -103,34 +103,72 @@ func main() {
 		w.WriteHeader(201)
 		w.Write(data)
 	})
-	mux.HandleFunc("GET /api/chirps", func (w http.ResponseWriter, r *http.Request) {
-			dbChirps, err := apiCfg.dbQueries.GetChirps(r.Context())
-			if err != nil {
-				log.Printf("Error connecting to database %s", err)
-				w.WriteHeader(500)
-				return
-			}
+	mux.HandleFunc("GET /api/chirps/{chirpID}", func (w http.ResponseWriter, r *http.Request) {
+		stringId := r.PathValue("chirpID")
+		uuId, err := uuid.Parse(stringId)
+		if err != nil {
+			log.Printf("Error parsing chirp id%s", err)
+			w.WriteHeader(300)
+			return
+		}
 
-			var respBody []Chirp
-			for _, dbChirp := range dbChirps {
-				respRow := Chirp{
-					ID: dbChirp.ID,
-					CreatedAt: dbChirp.CreatedAt,
-					UpdatedAt: dbChirp.UpdatedAt,
-					Body: dbChirp.Body,
-					UserId: dbChirp.UserID,
-				}
-				respBody = append(respBody, respRow)
-			}
-			data, err := json.Marshal(respBody)
-			if err != nil {
-				log.Printf("Error marshalling JSON: %s", err)
-				w.WriteHeader(500)
+		dbChirp, err := apiCfg.dbQueries.GetChirp(r.Context(), uuId)
+		if err != nil {
+			if strings.Contains(fmt.Sprintf("%s", err), "no rows in result set") {
+				log.Printf("No Chirp Found")
+				w.WriteHeader(404)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(200)
-			w.Write(data)
+			log.Printf("Error connecting to database %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		respBody := Chirp{
+			ID: dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			Body: dbChirp.Body,
+			UserId: dbChirp.UserID,
+		}
+		data, err := json.Marshal(respBody)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(data)
+	})
+	mux.HandleFunc("GET /api/chirps", func (w http.ResponseWriter, r *http.Request) {
+		dbChirps, err := apiCfg.dbQueries.GetChirps(r.Context())
+		if err != nil {
+			log.Printf("Error connecting to database %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		var respBody []Chirp
+		for _, dbChirp := range dbChirps {
+			respRow := Chirp{
+				ID: dbChirp.ID,
+				CreatedAt: dbChirp.CreatedAt,
+				UpdatedAt: dbChirp.UpdatedAt,
+				Body: dbChirp.Body,
+				UserId: dbChirp.UserID,
+			}
+			respBody = append(respBody, respRow)
+		}
+		data, err := json.Marshal(respBody)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(data)
 	})
 	mux.HandleFunc("POST /api/chirps", func (w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
