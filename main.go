@@ -103,6 +103,35 @@ func main() {
 		w.WriteHeader(201)
 		w.Write(data)
 	})
+	mux.HandleFunc("GET /api/chirps", func (w http.ResponseWriter, r *http.Request) {
+			dbChirps, err := apiCfg.dbQueries.GetChirps(r.Context())
+			if err != nil {
+				log.Printf("Error connecting to database %s", err)
+				w.WriteHeader(500)
+				return
+			}
+
+			var respBody []Chirp
+			for _, dbChirp := range dbChirps {
+				respRow := Chirp{
+					ID: dbChirp.ID,
+					CreatedAt: dbChirp.CreatedAt,
+					UpdatedAt: dbChirp.UpdatedAt,
+					Body: dbChirp.Body,
+					UserId: dbChirp.UserID,
+				}
+				respBody = append(respBody, respRow)
+			}
+			data, err := json.Marshal(respBody)
+			if err != nil {
+				log.Printf("Error marshalling JSON: %s", err)
+				w.WriteHeader(500)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			w.Write(data)
+	})
 	mux.HandleFunc("POST /api/chirps", func (w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
 			Body string `json:"body"`
