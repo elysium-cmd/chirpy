@@ -5,12 +5,14 @@ import (
 	"log"
 	"fmt"
 	"strings"
+	"time"
 	"encoding/json"
 	"sync/atomic"
 	"net/http"
 	"database/sql"
 	"github.com/joho/godotenv"
 	"github.com/elysium-cmd/chirpy/internal/database"
+	"github.com/google/uuid"
 )
 import _ "github.com/lib/pq"
 
@@ -19,12 +21,23 @@ type apiConfig struct {
 	dbQueries *database.Queries
 }
 
-type errors struct {
-	Error string `json:"error"`
+type User struct {
+	ID uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email string `json:"email"`
 }
 
-type response struct {
-	CleanedBody string `json:"cleaned_body"`
+type Chirp struct {
+	ID uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body string `json:"body"`
+	UserId uuid.UUID `json:"user_id"`
+}
+
+type errors struct {
+	Error string `json:"error"`
 }
 
 func (cfg *apiConfig) middlewareMetrics(next http.Handler) http.Handler {
@@ -32,57 +45,6 @@ func (cfg *apiConfig) middlewareMetrics(next http.Handler) http.Handler {
 		cfg.fileServerHits.Store(cfg.fileServerHits.Add(1))
 		next.ServeHTTP(w, r)
 	})
-}
-
-func validate(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Body string `json:"body"`
-	}
-	
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		log.Printf("Error decoding parameters %s", err)
-		w.WriteHeader(500)
-		return
-	}
-	if len(params.Body) > 140 {
-		respBody := errors{
-			Error: "Chirp is too long",
-		}
-		data, err := json.Marshal(respBody)
-		if err != nil {
-			log.Printf("Error marshalling JSON: %s", err)
-			w.WriteHeader(500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
-		w.Write(data)
-	} else {
-		cleanedBody := ""
-		splitBody := strings.Split(params.Body, " ")
-		for index := range splitBody {
-			lowerCaseWord := strings.ToLower(splitBody[index])
-			if lowerCaseWord == "kerfuffle" || lowerCaseWord == "sharbert" || lowerCaseWord == "fornax"{
-				splitBody[index] = "****"
-			}
-		}
-		cleanedBody = strings.Join(splitBody, " ")
-		respBody := response{
-			CleanedBody: cleanedBody,
-		}
-		data, err := json.Marshal(respBody)
-		if err != nil {
-			log.Printf("Error marshalling JSON: %s", err)
-			w.WriteHeader(500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		w.Write(data)
-	}
 }
 
 func health(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +55,7 @@ func health(w http.ResponseWriter, r *http.Request) {
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	env := os.Getenv("PLATFORM")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Printf("Error connecting to database %s", err)
@@ -104,7 +67,110 @@ func main() {
 	}
 	apiCfg.fileServerHits.Store(0)
 	mux.Handle("/app/", apiCfg.middlewareMetrics(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
-	mux.HandleFunc("/api/validate_chirp", validate)
+	mux.HandleFunc("POST /api/users", func (w http.ResponseWriter, r *http.Request) {
+		type parameters struct {
+			Email string `json:"email"`
+		}
+		
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		err := decoder.Decode(&params)
+		if err != nil {
+			log.Printf("Error decoding parameters %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		dbUser, err := apiCfg.dbQueries.CreateUser(r.Context(), params.Email)
+		if err != nil {
+			log.Printf("Error connecting to database %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		respBody := User{
+			ID: dbUser.ID,
+			CreatedAt: dbUser.CreatedAt,
+			UpdatedAt: dbUser.UpdatedAt,
+			Email: dbUser.Email,
+		}
+		data, err := json.Marshal(respBody)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(201)
+		w.Write(data)
+	})
+	mux.HandleFunc("POST /api/chirps", func (w http.ResponseWriter, r *http.Request) {
+		type parameters struct {
+			Body string `json:"body"`
+			UserId uuid.UUID `json:"user_id"`
+		}
+		
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		err := decoder.Decode(&params)
+		if err != nil {
+			log.Printf("Error decoding parameters %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		// Validate Chirp
+		if len(params.Body) > 140 {
+			respBody := errors{
+				Error: "Chirp is too long",
+			}
+			data, err := json.Marshal(respBody)
+			if err != nil {
+				log.Printf("Error marshalling JSON: %s", err)
+				w.WriteHeader(500)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(400)
+			w.Write(data)
+		} else {
+			cleanedBody := ""
+			splitBody := strings.Split(params.Body, " ")
+			for index := range splitBody {
+				lowerCaseWord := strings.ToLower(splitBody[index])
+				if lowerCaseWord == "kerfuffle" || lowerCaseWord == "sharbert" || lowerCaseWord == "fornax"{
+					splitBody[index] = "****"
+				}
+			}
+			cleanedBody = strings.Join(splitBody, " ")
+
+			dbChirp, err := apiCfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
+				Body: cleanedBody,
+				UserID: params.UserId,
+			})
+			if err != nil {
+				log.Printf("Error connecting to database %s", err)
+				w.WriteHeader(500)
+				return
+			}
+			respBody := Chirp{
+				ID: dbChirp.ID,
+				CreatedAt: dbChirp.CreatedAt,
+				UpdatedAt: dbChirp.UpdatedAt,
+				Body: dbChirp.Body,
+				UserId: dbChirp.UserID,
+			}
+			data, err := json.Marshal(respBody)
+			if err != nil {
+				log.Printf("Error marshalling JSON: %s", err)
+				w.WriteHeader(500)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(201)
+			w.Write(data)
+		}
+	})
+
 	mux.HandleFunc("GET /api/healthz", health)
 	mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, r *http.Request){
 		w.WriteHeader(200)
@@ -112,7 +178,16 @@ func main() {
 		w.Write([]byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", apiCfg.fileServerHits.Load())))
 	})
 	mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, r *http.Request){
-		apiCfg.fileServerHits.Store(0)
+		if env != "dev" {
+			w.WriteHeader(403)
+			return
+		}
+		err := apiCfg.dbQueries.DeleteUsers(r.Context())
+		if err != nil {
+			log.Printf("Error connecting to database %s", err)
+			w.WriteHeader(500)
+			return
+		}
 		w.WriteHeader(200)
 	})
 	server := http.Server{
