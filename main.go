@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"github.com/joho/godotenv"
 	"github.com/elysium-cmd/chirpy/internal/database"
+	"github.com/elysium-cmd/chirpy/internal/auth"
 	"github.com/google/uuid"
 )
 import _ "github.com/lib/pq"
@@ -70,6 +71,7 @@ func main() {
 	mux.HandleFunc("POST /api/users", func (w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
 			Email string `json:"email"`
+			Password string `json:"password"`
 		}
 		
 		decoder := json.NewDecoder(r.Body)
@@ -81,7 +83,17 @@ func main() {
 			return
 		}
 
-		dbUser, err := apiCfg.dbQueries.CreateUser(r.Context(), params.Email)
+		hash, err := auth.HashPassword(params.Password)
+		if err != nil {
+			log.Printf("Error hashing password %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		dbUser, err := apiCfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
+			Email: params.Email, 
+			HashedPassword: hash,
+		})
 		if err != nil {
 			log.Printf("Error connecting to database %s", err)
 			w.WriteHeader(500)
@@ -101,6 +113,57 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(201)
+		w.Write(data)
+	})
+	mux.HandleFunc("POST /api/login", func (w http.ResponseWriter, r *http.Request) {
+		type parameters struct {
+			Email string `json:"email"`
+			Password string `json:"password"`
+		}
+		
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		err := decoder.Decode(&params)
+		if err != nil {
+			log.Printf("Error decoding parameters %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		dbUser, err := apiCfg.dbQueries.GetUserByEmail(r.Context(), params.Email)
+		if err != nil {
+			w.WriteHeader(401)
+			w.Write([]byte(fmt.Sprintf("incorrect email or password")))
+			return
+		}
+
+		match, err := auth.CheckPasswordHash(params.Password, dbUser.HashedPassword)
+		if err != nil {
+			w.WriteHeader(401)
+			w.Write([]byte(fmt.Sprintf("incorrect email or password")))
+			return
+		}
+		
+		if !match {
+			w.WriteHeader(401)
+			w.Write([]byte(fmt.Sprintf("incorrect email or password")))
+			return
+		}
+
+		respBody := User{
+			ID: dbUser.ID,
+			CreatedAt: dbUser.CreatedAt,
+			UpdatedAt: dbUser.UpdatedAt,
+			Email: dbUser.Email,
+		}
+		data, err := json.Marshal(respBody)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
 		w.Write(data)
 	})
 	mux.HandleFunc("GET /api/chirps/{chirpID}", func (w http.ResponseWriter, r *http.Request) {
