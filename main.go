@@ -20,6 +20,7 @@ import _ "github.com/lib/pq"
 type apiConfig struct {
 	fileServerHits atomic.Int32
 	dbQueries *database.Queries
+	secret string
 }
 
 type User struct {
@@ -27,6 +28,7 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email string `json:"email"`
+	Token string `json:"token"`
 }
 
 type Chirp struct {
@@ -57,6 +59,7 @@ func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	env := os.Getenv("PLATFORM")
+	sec := os.Getenv("SECRET")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Printf("Error connecting to database %s", err)
@@ -65,6 +68,7 @@ func main() {
 	mux := http.NewServeMux()
 	apiCfg := apiConfig {
 		dbQueries: database.New(db),
+		secret: sec,
 	}
 	apiCfg.fileServerHits.Store(0)
 	mux.Handle("/app/", apiCfg.middlewareMetrics(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
@@ -119,6 +123,7 @@ func main() {
 		type parameters struct {
 			Email string `json:"email"`
 			Password string `json:"password"`
+			ExpiresIn int `json:"expires_in_seconds"`
 		}
 		
 		decoder := json.NewDecoder(r.Body)
@@ -150,11 +155,20 @@ func main() {
 			return
 		}
 
+		token, err := auth.MakeJWT(dbUser.ID, apiCfg.secret, params.ExpiresIn)
+
+		if err != nil {
+			log.Printf("Error decoding parameters %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
 		respBody := User{
 			ID: dbUser.ID,
 			CreatedAt: dbUser.CreatedAt,
 			UpdatedAt: dbUser.UpdatedAt,
 			Email: dbUser.Email,
+			Token: token,
 		}
 		data, err := json.Marshal(respBody)
 		if err != nil {
@@ -236,7 +250,6 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", func (w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
 			Body string `json:"body"`
-			UserId uuid.UUID `json:"user_id"`
 		}
 		
 		decoder := json.NewDecoder(r.Body)
@@ -245,6 +258,21 @@ func main() {
 		if err != nil {
 			log.Printf("Error decoding parameters %s", err)
 			w.WriteHeader(500)
+			return
+		}
+
+		// Validates Token
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			log.Printf("No token provided %s", err)
+			w.WriteHeader(401)
+			return
+		}
+
+		userId, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			log.Printf("Invalid token %s", err)
+			w.WriteHeader(401)
 			return
 		}
 
@@ -275,7 +303,7 @@ func main() {
 
 			dbChirp, err := apiCfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
 				Body: cleanedBody,
-				UserID: params.UserId,
+				UserID: userId,
 			})
 			if err != nil {
 				log.Printf("Error connecting to database %s", err)

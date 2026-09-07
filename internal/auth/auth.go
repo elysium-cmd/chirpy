@@ -2,7 +2,9 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"time"
+	"net/http"
 	"github.com/alexedwards/argon2id"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -24,13 +26,21 @@ func CheckPasswordHash(password, hash string) (bool, error) {
 	return match, err
 }
 
-func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
-	mySigningKey := []byte("ItsATrap")
+func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn int) (string, error) {
+	mySigningKey := []byte(tokenSecret)
+	jwtStartTime := jwt.NewNumericDate(time.Now())
+	jwtDefaultDuration := time.Duration(3600 * int(time.Second))
+	jwtRequestedDuration := time.Duration(expiresIn * int(time.Second))
+	jwtEndTime := jwt.NewNumericDate(jwtStartTime.Add(jwtDefaultDuration))
+
+	if jwtRequestedDuration < jwtDefaultDuration {
+		jwtEndTime = jwt.NewNumericDate(jwtStartTime.Add(jwtRequestedDuration))
+	}
 
 	claims := &jwt.RegisteredClaims{
 		Issuer: "chirpy-access",
-		IssuedAt: jwt.NewNumericDate(time.Now()),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
+		IssuedAt: jwtStartTime,
+		ExpiresAt: jwtEndTime,
 		Subject: userID.String(),
 	}
 
@@ -44,7 +54,7 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (any, error) {
-		return []byte("ItsATrap"), nil
+		return []byte(tokenSecret), nil
 	}, jwt.WithLeeway(5 * time.Second))
 	if err != nil {
 		return uuid.Nil, err
@@ -52,5 +62,15 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		return uuid.MustParse(claims.Subject), nil
 	} else {
 		return uuid.Nil, errors.New("Unknown claims type")
+	}
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	bearerToken := headers.Get("Authorization")
+
+	if bearerToken == "" {
+		return "", errors.New("No bearer token found")
+	} else {
+		return strings.TrimPrefix(bearerToken, "Bearer "), nil
 	}
 }
