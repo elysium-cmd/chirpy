@@ -463,6 +463,54 @@ func main() {
 		}
 	})
 
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", func (w http.ResponseWriter, r *http.Request) {
+		// Validates Token
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			log.Printf("No token provided %s", err)
+			w.WriteHeader(401)
+			return
+		}
+
+		userId, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			log.Printf("Invalid token %s", err)
+			w.WriteHeader(403)
+			return
+		}
+
+		// Attempts to get the provided id
+		stringId := r.PathValue("chirpID")
+		chirpId , err := uuid.Parse(stringId)
+		if err != nil {
+			log.Printf("Error parsing chirp id%s", err)
+			w.WriteHeader(300)
+			return
+		}
+		chirp, err := apiCfg.dbQueries.GetChirp(r.Context(), chirpId)
+		if err != nil {
+			w.WriteHeader(404)
+			return
+		}
+
+		// Validates the user owns the chirp
+		if userId != chirp.UserID {
+			log.Printf("Unable to delete some else's chirp")
+			w.WriteHeader(403)
+			return
+		}
+
+		// Delete Chirps
+		err = apiCfg.dbQueries.DeleteChirp(r.Context(), chirpId)
+		if err != nil {
+			log.Printf("Error deleting chirp id%s", err)
+			w.WriteHeader(300)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(204)
+	})
+
 	mux.HandleFunc("GET /api/healthz", health)
 	mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, r *http.Request){
 		w.WriteHeader(200)
