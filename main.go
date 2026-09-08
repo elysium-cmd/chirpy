@@ -124,6 +124,74 @@ func main() {
 		w.WriteHeader(201)
 		w.Write(data)
 	})
+
+	mux.HandleFunc("PUT /api/users", func (w http.ResponseWriter, r *http.Request) {
+		type parameters struct {
+			Email string `json:"email"`
+			Password string `json:"password"`
+		}
+
+		// Validate token
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			log.Printf("No token provided %s", err)
+			w.WriteHeader(401)
+			return
+		}
+
+		userId, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			log.Printf("Invalid token %s", err)
+			w.WriteHeader(401)
+			return
+		}
+		
+		// Hash password
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		err = decoder.Decode(&params)
+		if err != nil {
+			log.Printf("Error decoding parameters %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		hash, err := auth.HashPassword(params.Password)
+		if err != nil {
+			log.Printf("Error hashing password %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+
+		// Updates User
+		dbUser, err := apiCfg.dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
+			ID: userId,
+			Email: params.Email, 
+			HashedPassword: hash,
+		})
+		if err != nil {
+			log.Printf("Error connecting to database %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		respBody := User{
+			ID: dbUser.ID,
+			CreatedAt: dbUser.CreatedAt,
+			UpdatedAt: dbUser.UpdatedAt,
+			Email: dbUser.Email,
+		}
+		data, err := json.Marshal(respBody)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(data)
+	})
+
 	mux.HandleFunc("POST /api/login", func (w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
 			Email string `json:"email"`

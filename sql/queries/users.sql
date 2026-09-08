@@ -9,6 +9,10 @@ VALUES (
 )
 RETURNING *;
 
+-- name: UpdateUser :one
+UPDATE users SET (updated_at, email, hashed_password) = (NOW(), $2, $3) WHERE id = $1
+RETURNING *;
+
 -- name: GetUserByEmail :one
 SELECT * FROM users WHERE email = $1
 LIMIT 1;
