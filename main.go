@@ -23,12 +23,17 @@ type apiConfig struct {
 	secret string
 }
 
+type Token struct {
+	Token string `json:"token"`
+}
+
 type User struct {
 	ID uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email string `json:"email"`
 	Token string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type Chirp struct {
@@ -123,7 +128,6 @@ func main() {
 		type parameters struct {
 			Email string `json:"email"`
 			Password string `json:"password"`
-			ExpiresIn int `json:"expires_in_seconds"`
 		}
 		
 		decoder := json.NewDecoder(r.Body)
@@ -155,7 +159,7 @@ func main() {
 			return
 		}
 
-		token, err := auth.MakeJWT(dbUser.ID, apiCfg.secret, params.ExpiresIn)
+		token, err := auth.MakeJWT(dbUser.ID, apiCfg.secret)
 
 		if err != nil {
 			log.Printf("Error decoding parameters %s", err)
@@ -163,11 +167,56 @@ func main() {
 			return
 		}
 
+		refreshToken := auth.MakeRefreshToken()
+		dbRefreshToken, err := apiCfg.dbQueries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+			Token: refreshToken, 
+			UserID: dbUser.ID,
+			ExpiresAt: time.Now().AddDate(0, 0, 60),
+		})
 		respBody := User{
 			ID: dbUser.ID,
 			CreatedAt: dbUser.CreatedAt,
 			UpdatedAt: dbUser.UpdatedAt,
 			Email: dbUser.Email,
+			Token: token,
+			RefreshToken: dbRefreshToken.Token,
+		}
+		data, err := json.Marshal(respBody)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(data)
+	})
+
+	mux.HandleFunc("POST /api/refresh", func (w http.ResponseWriter, r *http.Request) {
+		refreshToken := r.Header.Get("Authorization")
+		refreshToken = strings.TrimPrefix(refreshToken, "Bearer ")
+
+		dbRefreshToken, err := apiCfg.dbQueries.GetRefreshToken(r.Context(), refreshToken)
+		if err != nil {
+			log.Printf("No token found %s", err)
+			w.WriteHeader(401)
+			return
+		}
+
+		if dbRefreshToken.RevokedAt.Valid || time.Now().After(dbRefreshToken.ExpiresAt) {
+			log.Printf("Token Expired")
+			w.WriteHeader(401)
+			return
+		}
+
+		token, err := auth.MakeJWT(dbRefreshToken.UserID, apiCfg.secret)
+		if err != nil {
+			log.Printf("Error Creating Token")
+			w.WriteHeader(500)
+			return
+		}
+
+		respBody := Token{
 			Token: token,
 		}
 		data, err := json.Marshal(respBody)
@@ -180,6 +229,23 @@ func main() {
 		w.WriteHeader(200)
 		w.Write(data)
 	})
+
+	mux.HandleFunc("POST /api/revoke", func (w http.ResponseWriter, r *http.Request) {
+		refreshToken := r.Header.Get("Authorization")
+		refreshToken = strings.TrimPrefix(refreshToken, "Bearer ")
+
+		log.Printf(refreshToken)
+
+		err := apiCfg.dbQueries.RevokeRefreshToken(r.Context(), refreshToken)
+		if err != nil {
+			log.Printf("No token found")
+			w.WriteHeader(401)
+			return
+		}
+
+		w.WriteHeader(204)
+	})
+
 	mux.HandleFunc("GET /api/chirps/{chirpID}", func (w http.ResponseWriter, r *http.Request) {
 		stringId := r.PathValue("chirpID")
 		uuId, err := uuid.Parse(stringId)

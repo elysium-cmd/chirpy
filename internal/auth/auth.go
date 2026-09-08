@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -26,16 +28,11 @@ func CheckPasswordHash(password, hash string) (bool, error) {
 	return match, err
 }
 
-func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn int) (string, error) {
+func MakeJWT(userID uuid.UUID, tokenSecret string) (string, error) {
 	mySigningKey := []byte(tokenSecret)
 	jwtStartTime := jwt.NewNumericDate(time.Now())
-	jwtDefaultDuration := time.Duration(3600 * int(time.Second))
-	jwtRequestedDuration := time.Duration(expiresIn * int(time.Second))
-	jwtEndTime := jwt.NewNumericDate(jwtStartTime.Add(jwtDefaultDuration))
-
-	if jwtRequestedDuration < jwtDefaultDuration {
-		jwtEndTime = jwt.NewNumericDate(jwtStartTime.Add(jwtRequestedDuration))
-	}
+	jwtDuration := time.Duration(3600 * int(time.Second))
+	jwtEndTime := jwt.NewNumericDate(jwtStartTime.Add(jwtDuration))
 
 	claims := &jwt.RegisteredClaims{
 		Issuer: "chirpy-access",
@@ -73,4 +70,10 @@ func GetBearerToken(headers http.Header) (string, error) {
 	} else {
 		return strings.TrimPrefix(bearerToken, "Bearer "), nil
 	}
+}
+
+func MakeRefreshToken() string {
+	key := make([]byte, 32)
+	rand.Read(key)
+	return hex.EncodeToString(key)
 }
