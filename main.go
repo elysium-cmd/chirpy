@@ -411,30 +411,29 @@ func main() {
 	})
 	mux.HandleFunc("GET /api/chirps", func (w http.ResponseWriter, r *http.Request) {
 		authorId := r.URL.Query().Get("author_id")
-		// var dbChirps []database.Chirp
-		// var err error
-		// if authorId == "" {
-		// 	dbChirps, err = apiCfg.dbQueries.GetChirps(r.Context())
-		// 	if err != nil {
-		// 		log.Printf("Error connecting to database %s", err)
-		// 		w.WriteHeader(500)
-		// 		return
-		// 	}
-		// } else {
-		authorUUID, err := uuid.Parse(authorId)
-		// 	if err != nil {
-		// 		log.Printf("Unable to parse author id into uuid ", err)
-		// 		w.WriteHeader(400)
-		// 		return
-		// 	}
-		// }
-		dbChirps, err := apiCfg.dbQueries.GetChirpsByAuthor(r.Context(), authorUUID)
-		if err != nil {
-			log.Printf("Error connecting to database %s", err)
-			w.WriteHeader(500)
-			return
+		var dbChirps []database.Chirp
+		var err error
+		if authorId == "" {
+			dbChirps, err = apiCfg.dbQueries.GetChirps(r.Context())
+			if err != nil {
+				log.Printf("Error connecting to database %s", err)
+				w.WriteHeader(500)
+				return
+			}
+		} else {
+			authorUUID, err := uuid.Parse(authorId)
+			if err != nil {
+				log.Printf("Unable to parse author id into uuid ", err)
+				w.WriteHeader(400)
+				return
+			}
+			dbChirps, err = apiCfg.dbQueries.GetChirpsByAuthor(r.Context(), authorUUID)
+			if err != nil {
+				log.Printf("Error connecting to database %s", err)
+				w.WriteHeader(500)
+				return
+			}
 		}
-
 
 		var respBody []Chirp
 		for _, dbChirp := range dbChirps {
