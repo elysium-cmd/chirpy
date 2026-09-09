@@ -34,6 +34,7 @@ type User struct {
 	Email string `json:"email"`
 	Token string `json:"token"`
 	RefreshToken string `json:"refresh_token"`
+	IsChirpyRed bool `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -77,6 +78,41 @@ func main() {
 	}
 	apiCfg.fileServerHits.Store(0)
 	mux.Handle("/app/", apiCfg.middlewareMetrics(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
+
+	mux.HandleFunc("POST /api/polka/webhooks", func (w http.ResponseWriter, r *http.Request) {
+		type data struct {
+			UserId uuid.UUID `json:"user_id"`
+		}
+		type parameters struct {
+			Event string `json:"event"`
+			Data data `json:"data"`
+		}
+		
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		err := decoder.Decode(&params)
+		if err != nil {
+			log.Printf("Error decoding parameters %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		if params.Event != "user.upgraded" {
+			w.WriteHeader(204)
+			return
+		}
+
+		err = apiCfg.dbQueries.UpgradeUser(r.Context(), params.Data.UserId)
+		if err != nil {
+			log.Printf("Error: %s", err)
+			w.WriteHeader(404)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(204)
+	})
+
 	mux.HandleFunc("POST /api/users", func (w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
 			Email string `json:"email"`
@@ -113,6 +149,7 @@ func main() {
 			CreatedAt: dbUser.CreatedAt,
 			UpdatedAt: dbUser.UpdatedAt,
 			Email: dbUser.Email,
+			IsChirpyRed: dbUser.IsChirpyRed,
 		}
 		data, err := json.Marshal(respBody)
 		if err != nil {
@@ -180,6 +217,7 @@ func main() {
 			CreatedAt: dbUser.CreatedAt,
 			UpdatedAt: dbUser.UpdatedAt,
 			Email: dbUser.Email,
+			IsChirpyRed: dbUser.IsChirpyRed,
 		}
 		data, err := json.Marshal(respBody)
 		if err != nil {
@@ -248,6 +286,7 @@ func main() {
 			Email: dbUser.Email,
 			Token: token,
 			RefreshToken: dbRefreshToken.Token,
+			IsChirpyRed: dbUser.IsChirpyRed,
 		}
 		data, err := json.Marshal(respBody)
 		if err != nil {

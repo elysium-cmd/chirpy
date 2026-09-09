@@ -13,6 +13,9 @@ RETURNING *;
 UPDATE users SET (updated_at, email, hashed_password) = (NOW(), $2, $3) WHERE id = $1
 RETURNING *;
 
+-- name: UpgradeUser :exec
+UPDATE users SET is_chirpy_red = true WHERE id = $1;
+
 -- name: GetUserByEmail :one
 SELECT * FROM users WHERE email = $1
 LIMIT 1;
