@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"sort"
 	"encoding/json"
 	"sync/atomic"
 	"net/http"
@@ -411,6 +412,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /api/chirps", func (w http.ResponseWriter, r *http.Request) {
 		authorId := r.URL.Query().Get("author_id")
+		sortParam := r.URL.Query().Get("sort")
 		var dbChirps []database.Chirp
 		var err error
 		if authorId == "" {
@@ -445,6 +447,9 @@ func main() {
 				UserId: dbChirp.UserID,
 			}
 			respBody = append(respBody, respRow)
+		}
+		if sortParam == "desc" {
+			sort.Slice(respBody, func(i, j int) bool { return !respBody[i].CreatedAt.Before(respBody[j].CreatedAt)})
 		}
 		data, err := json.Marshal(respBody)
 		if err != nil {
