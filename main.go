@@ -21,6 +21,7 @@ type apiConfig struct {
 	fileServerHits atomic.Int32
 	dbQueries *database.Queries
 	secret string
+	polkaKey string
 }
 
 type Token struct {
@@ -66,6 +67,7 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	env := os.Getenv("PLATFORM")
 	sec := os.Getenv("SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Printf("Error connecting to database %s", err)
@@ -75,11 +77,26 @@ func main() {
 	apiCfg := apiConfig {
 		dbQueries: database.New(db),
 		secret: sec,
+		polkaKey: polkaKey,
 	}
 	apiCfg.fileServerHits.Store(0)
 	mux.Handle("/app/", apiCfg.middlewareMetrics(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
 
 	mux.HandleFunc("POST /api/polka/webhooks", func (w http.ResponseWriter, r *http.Request) {
+		// Validate api key
+		apiKey, err := auth.GetAPIKey(r.Header)
+		if err != nil {
+			log.Printf("Error getting api key from request %s", err)
+			w.WriteHeader(401)
+			return
+		}
+		if apiKey != apiCfg.polkaKey {
+			log.Printf("Wrong API Key")
+			w.WriteHeader(401)
+			return
+		}
+
+		// Get request body
 		type data struct {
 			UserId uuid.UUID `json:"user_id"`
 		}
@@ -90,13 +107,14 @@ func main() {
 		
 		decoder := json.NewDecoder(r.Body)
 		params := parameters{}
-		err := decoder.Decode(&params)
+		err = decoder.Decode(&params)
 		if err != nil {
 			log.Printf("Error decoding parameters %s", err)
 			w.WriteHeader(500)
 			return
 		}
 
+		// Choose event
 		if params.Event != "user.upgraded" {
 			w.WriteHeader(204)
 			return
